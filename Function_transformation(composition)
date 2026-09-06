@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Визуализатор преобразований функций</title>
+<style>
+  :root {
+    --ui: 1; --plot: 1;
+    --bg: #ffffff; --surface: #f7f7f5; --border: #e0dfda; --border-strong: #c3c2b7;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --accent: #378ADD; --base-line: #898781;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a19; --surface: #242423; --border: #383835; --border-strong: #52514e;
+      --text-primary: #f0efec; --text-secondary: #c3c2b7; --accent: #5aa4ea; --base-line: #9a9993;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px;
+    background: var(--bg); color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center;
+  }
+  .container { width: 100%; max-width: 480px; }
+  @media print {
+    body { background: #fff !important; color: #000 !important; padding: 0; }
+    .plot-wrap, table, #stepsWrap { break-inside: avoid; page-break-inside: avoid; }
+    #stepsList li { break-inside: avoid; page-break-inside: avoid; }
+    #langBtn, #modeBtn, #resetBtn, .step-nav, .zoom-row { display: none !important; }
+    .container { max-width: 100%; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+
+  .header-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 20px;
+  }
+  h1 { font-size: calc(20px * var(--ui)); font-weight: 500; margin: 0; }
+  #langBtn, #resetBtn, #modeBtn {
+    flex-shrink: 0; height: calc(32px * var(--ui)); padding: 0 calc(14px * var(--ui)); border-radius: 8px;
+    border: 0.5px solid var(--border-strong); background: var(--surface);
+    color: var(--text-primary); font-size: calc(13px * var(--ui)); cursor: pointer;
+  }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .row label { font-size: calc(13px * var(--ui)); color: var(--text-secondary); min-width: calc(96px * var(--ui)); line-height: 1.25; }
+  select {
+    flex: 1; height: calc(36px * var(--ui)); border-radius: 8px; border: 0.5px solid var(--border);
+    background: var(--surface); color: var(--text-primary); padding: 0 10px; font-size: calc(14px * var(--ui));
+  }
+  .plot-wrap { position: relative; height: calc(300px * var(--plot)); margin: 16px 0 8px; touch-action: pan-y; }
+  svg { width: 100%; height: 100%; }
+  .plot-legend {
+    position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column;
+    gap: 4px; font-size: calc(12px * var(--ui)); color: var(--text-secondary); pointer-events: none;
+  }
+  .plot-legend span { display: flex; align-items: center; gap: 6px; }
+  .swatch { display: inline-block; width: 14px; height: 2px; }
+  .zoom-row {
+    position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px;
+  }
+  .zoom-row button {
+    width: calc(30px * var(--ui)); height: calc(30px * var(--ui));
+    border-radius: 7px; border: 0.5px solid var(--border-strong);
+    background: var(--surface); color: var(--text-primary);
+    font-size: calc(16px * var(--ui)); line-height: 1; cursor: pointer;
+  }
+  .zoom-row button:disabled { opacity: 0.35; cursor: default; }
+  .step-nav {
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px; margin-bottom: 12px;
+  }
+  .step-nav button {
+    width: calc(48px * var(--ui)); height: calc(36px * var(--ui)); border-radius: 8px;
+    border: 0.5px solid var(--border-strong); background: var(--surface);
+    color: var(--text-primary); font-size: calc(17px * var(--ui)); line-height: 1; cursor: pointer;
+  }
+  .step-nav button:disabled { opacity: 0.35; cursor: default; }
+  #stepIndicator { font-size: calc(13px * var(--ui)); color: var(--text-secondary); min-width: 68px; text-align: center; }
+  .static-formula { font-size: calc(13px * var(--ui)); color: var(--text-secondary); text-align: center; margin-bottom: 14px; }
+  .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; margin-bottom: 14px; }
+  .slider-label { display: flex; justify-content: space-between; font-size: calc(13px * var(--ui)); color: var(--text-secondary); margin-bottom: 4px; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); height: calc(20px * var(--ui)); }
+  .checks { display: flex; gap: 24px; justify-content: center; margin-bottom: 14px; }
+  .checks label { display: flex; align-items: center; gap: 6px; font-size: calc(13px * var(--ui)); color: var(--text-secondary); cursor: pointer; }
+  #formulaSub, #formula { font-size: calc(15px * var(--ui)); text-align: center; font-weight: 500; padding-top: 8px; }
+  #formulaSub { border-top: 0.5px solid var(--border); }
+  #stepsList li { transition: opacity 0.2s; }
+  #stepsList li.pending { opacity: 0.38; }
+  #stepsList li.current {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-radius: 6px; padding: 2px 6px; margin-left: -6px;
+  }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 28px; font-size: calc(13px * var(--ui)); }
+  caption { text-align: left; font-size: calc(16px * var(--ui)); font-weight: 500; margin-bottom: 12px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 0.5px solid var(--border); vertical-align: top; }
+  th { color: var(--text-secondary); font-weight: 500; font-size: calc(12px * var(--ui)); }
+  td.formula-cell { white-space: nowrap; font-family: "Courier New", monospace; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header-row">
+    <h1 data-i18n="title">Визуализатор преобразований функций</h1>
+    <div style="display:flex;gap:8px;flex-shrink:0;">
+      <button id="modeBtn" type="button"></button>
+      <button id="langBtn" type="button">EN</button>
+    </div>
+  </div>
+
+  <table>
+    <caption data-i18n="tableCaption">Описание преобразований</caption>
+    <thead>
+      <tr>
+        <th data-i18n="thTransform">Преобразование</th>
+        <th data-i18n="thFormula">Формула</th>
+        <th data-i18n="thWhat">Что происходит</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td data-i18n="r1n">Вертикальный сдвиг вверх</td><td class="formula-cell">f(x) + k</td><td data-i18n="r1d">график сдвигается вверх на k</td></tr>
+      <tr><td data-i18n="r2n">Вертикальный сдвиг вниз</td><td class="formula-cell">f(x) − k</td><td data-i18n="r2d">график сдвигается вниз на k</td></tr>
+      <tr><td data-i18n="r3n">Горизонтальный сдвиг вправо</td><td class="formula-cell">f(x − h)</td><td data-i18n="r3d">график сдвигается вправо на h</td></tr>
+      <tr><td data-i18n="r4n">Горизонтальный сдвиг влево</td><td class="formula-cell">f(x + h)</td><td data-i18n="r4d">график сдвигается влево на h</td></tr>
+      <tr><td data-i18n="r5n">Отражение по оси x</td><td class="formula-cell">-1·f(x)</td><td data-i18n="r5d">график переворачивается вверх ногами</td></tr>
+      <tr><td data-i18n="r6n">Отражение по оси y</td><td class="formula-cell">f(-1·x)</td><td data-i18n="r6d">график зеркалится слева направо</td></tr>
+      <tr><td data-i18n="r7n">Вертикальное растяжение</td><td class="formula-cell">a·f(x), a &gt; 1</td><td data-i18n="r7d">график «вытягивается» по вертикали в a раз</td></tr>
+      <tr><td data-i18n="r8n">Вертикальное сжатие</td><td class="formula-cell">a·f(x), 0 &lt; a &lt; 1</td><td data-i18n="r8d">график «сплющивается» по вертикали в a раз</td></tr>
+      <tr><td data-i18n="r9n">Горизонтальное сжатие</td><td class="formula-cell">f(b·x), b &gt; 1</td><td data-i18n="r9d">график «сжимается» по горизонтали в b раз</td></tr>
+      <tr><td data-i18n="r10n">Горизонтальное растяжение</td><td class="formula-cell">f(x/b), b &gt; 1</td><td data-i18n="r10d">график «растягивается» по горизонтали в b раз</td></tr>
+      <tr><td data-i18n="r11n">Модуль по y</td><td class="formula-cell">|f(x)|</td><td data-i18n="r11d">часть графика ниже оси x отражается вверх</td></tr>
+      <tr><td data-i18n="r12n">Модуль по x</td><td class="formula-cell">f(|x|)</td><td data-i18n="r12d">правая часть графика (x ≥ 0) зеркально копируется на левую, исходная левая часть отбрасывается</td></tr>
+    </tbody>
+  </table>
+
+  <div class="row">
+    <label for="fnSel" data-i18n="fnLabel">Базовая функция</label>
+    <select id="fnSel">
+      <option value="lin">f(x) = x</option>
+      <option value="abs">f(x) = |x|</option>
+      <option value="x2">f(x) = x²</option>
+      <option value="cube">f(x) = x³</option>
+      <option value="sqrt">f(x) = √x</option>
+      <option value="inv">f(x) = 1/x</option>
+      <option value="exp">f(x) = e^x</option>
+      <option value="ln">f(x) = ln(x)</option>
+      <option value="sin">f(x) = sin(x)</option>
+      <option value="cos">f(x) = cos(x)</option>
+      <option value="tan">f(x) = tan(x)</option>
+    </select>
+  </div>
+
+  <div class="static-formula">g(x) = a&middot;f(b&middot;(x&minus;h)) + k</div>
+
+  <div class="sliders">
+    <div>
+      <div class="slider-label"><span data-i18n="kLabel">k (сдвиг верт.)</span><span id="kOut">0</span></div>
+      <input type="range" id="k" min="-4" max="4" step="1" value="0">
+    </div>
+    <div>
+      <div class="slider-label"><span data-i18n="hLabel">h (сдвиг гориз.)</span><span id="hOut">0</span></div>
+      <input type="range" id="h" min="-6" max="6" step="1" value="0">
+    </div>
+    <div>
+      <div class="slider-label"><span data-i18n="aLabel">a (верт. масштаб)</span><span id="aOut">1</span></div>
+      <input type="range" id="a" min="-2.5" max="2.5" step="0.1" value="1">
+    </div>
+    <div>
+      <div class="slider-label"><span data-i18n="bLabel">b (гориз. масштаб)</span><span id="bOut">1</span></div>
+      <input type="range" id="b" min="-2.5" max="2.5" step="0.1" value="1">
+    </div>
+  </div>
+
+  <div class="checks">
+    <label><input type="checkbox" id="absY">|g(x)|</label>
+    <label><input type="checkbox" id="absX">g(|x|)</label>
+  </div>
+
+  <div style="display:flex;justify-content:center;margin-bottom:14px;">
+    <button id="resetBtn" type="button" data-i18n="resetBtn">Сбросить</button>
+  </div>
+
+  <div id="formulaSub"></div>
+  <div id="formula"></div>
+
+  <div class="plot-wrap">
+    <svg id="plot" viewBox="0 0 380 300" role="img" data-i18n-aria="plotAria" aria-label="График исходной и преобразованной функции"></svg>
+    <div class="zoom-row">
+      <button id="zoomOut" type="button" aria-label="Отдалить">&minus;</button>
+      <button id="zoomIn" type="button" aria-label="Приблизить">+</button>
+    </div>
+    <div class="plot-legend">
+      <span><span class="swatch" style="background:var(--base-line);"></span>f(x)</span>
+      <span><span class="swatch" style="background:var(--accent);"></span>g(x)</span>
+    </div>
+  </div>
+
+  <div class="step-nav">
+    <button id="prevStep" type="button" aria-label="Предыдущий шаг">&#8592;</button>
+    <span id="stepIndicator"></span>
+    <button id="nextStep" type="button" aria-label="Следующий шаг">&#8594;</button>
+  </div>
+
+  <div id="stepsWrap" style="margin-top:24px;">
+    <div style="font-size:calc(16px * var(--ui));font-weight:500;margin-bottom:10px;" data-i18n="stepsTitle">Пошаговый разбор композиции</div>
+    <ol id="stepsList" style="padding-left:20px;font-size:calc(14px * var(--ui));line-height:1.9;margin:0;"></ol>
+  </div>
+</div>
+<script>
+(function(){
+const svg = document.getElementById('plot');
+const W = 380, H = 300, ox = W/2, oy = H/2;
+const BASE_SCALE = 22;      // one cell = one unit at zoom 1
+let zoom = 1;
+let scale = BASE_SCALE;     // always the same for x and y — the grid stays square
+
+const translations = {
+  ru: {
+    title: 'Визуализатор преобразований функций',
+    fnLabel: 'Базовая функция',
+    paletteBtn: 'Палитра',
+    plotAria: 'График исходной и преобразованной функции',
+    kLabel: 'k (сдвиг верт.)', hLabel: 'h (сдвиг гориз.)',
+    aLabel: 'a (верт. масштаб)', bLabel: 'b (гориз. масштаб)',
+    resetBtn: 'Сбросить',
+    stepsTitle: 'Пошаговый разбор композиции',
+    baseLine: 'f(x) = базовая функция',
+    baseGraphPrefix: 'график базовой функции',
+    andWord: 'и', thenWord: 'потом',
+    stepLet: 'Пусть', stepThen: 'Тогда', stepFull: 'Итог',
+    reflectXAxis: 'отразился относительно оси x',
+    reflectYAxis: 'отразился относительно оси y',
+    stretchVert: 'растянулся по вертикали в {n} раз',
+    compressVert: 'сжался по вертикали в {n} раз',
+    compressHoriz: 'сжался по горизонтали в {n} раз',
+    stretchHoriz: 'растянулся по горизонтали в {n} раз',
+    shiftRight: 'сместился вправо на {n}', shiftLeft: 'сместился влево на {n}',
+    shiftUp: 'сместился вверх на {n}', shiftDown: 'сместился вниз на {n}',
+    degenVert: 'выродился в прямую y = 0 — это уже не масштабирование (a = 0)',
+    degenHoriz: 'выродился в горизонтальную прямую y = f(0) — это уже не масштабирование (b = 0)',
+    absXComment: 'правая часть (x ≥ 0) зеркально скопирована на левую сторону, исходная левая часть отброшена',
+    absYComment: 'часть ниже оси x отразилась вверх',
+    tableCaption: 'Описание преобразований',
+    thTransform: 'Преобразование', thFormula: 'Формула', thWhat: 'Что происходит',
+    r1n:'Вертикальный сдвиг вверх', r1d:'график сдвигается вверх на k',
+    r2n:'Вертикальный сдвиг вниз', r2d:'график сдвигается вниз на k',
+    r3n:'Горизонтальный сдвиг вправо', r3d:'график сдвигается вправо на h',
+    r4n:'Горизонтальный сдвиг влево', r4d:'график сдвигается влево на h',
+    r5n:'Отражение по оси x', r5d:'график переворачивается вверх ногами',
+    r6n:'Отражение по оси y', r6d:'график зеркалится слева направо',
+    r7n:'Вертикальное растяжение', r7d:'график «вытягивается» по вертикали в a раз',
+    r8n:'Вертикальное сжатие', r8d:'график «сплющивается» по вертикали в a раз',
+    r9n:'Горизонтальное сжатие', r9d:'график «сжимается» по горизонтали в b раз',
+    r10n:'Горизонтальное растяжение', r10d:'график «растягивается» по горизонтали в b раз',
+    r11n:'Модуль по y', r11d:'часть графика ниже оси x отражается вверх',
+    r12n:'Модуль по x', r12d:'правая часть графика (x ≥ 0) зеркально копируется на левую, исходная левая часть отбрасывается'
+  },
+  en: {
+    title: 'Function transformations visualizer',
+    fnLabel: 'Parent function',
+    paletteBtn: 'Palette',
+    plotAria: 'Plot of the original and transformed function',
+    kLabel: 'k (vertical shift)', hLabel: 'h (horizontal shift)',
+    aLabel: 'a (vertical scale)', bLabel: 'b (horizontal scale)',
+    resetBtn: 'Reset',
+    stepsTitle: 'Step-by-step composition breakdown',
+    baseLine: 'f(x) = the base function',
+    baseGraphPrefix: 'the graph of the base function',
+    andWord: 'and', thenWord: 'then',
+    stepLet: 'Let', stepThen: 'Then', stepFull: 'Result',
+    reflectXAxis: 'flipped over the x-axis',
+    reflectYAxis: 'flipped over the y-axis',
+    stretchVert: 'stretched vertically by a factor of {n}',
+    compressVert: 'compressed vertically by a factor of {n}',
+    compressHoriz: 'compressed horizontally by a factor of {n}',
+    stretchHoriz: 'stretched horizontally by a factor of {n}',
+    shiftRight: 'shifted right by {n}', shiftLeft: 'shifted left by {n}',
+    shiftUp: 'shifted up by {n}', shiftDown: 'shifted down by {n}',
+    degenVert: 'collapsed to the line y = 0 — this is no longer a scaling (a = 0)',
+    degenHoriz: 'collapsed to the horizontal line y = f(0) — this is no longer a scaling (b = 0)',
+    absXComment: 'the right half (x ≥ 0) is mirrored onto the left; the original left half is discarded',
+    absYComment: 'the part below the x-axis flipped up',
+    tableCaption: 'Transformation reference',
+    thTransform: 'Transformation', thFormula: 'Formula', thWhat: 'What happens',
+    r1n:'Vertical shift up', r1d:'the graph shifts up by k',
+    r2n:'Vertical shift down', r2d:'the graph shifts down by k',
+    r3n:'Horizontal shift right', r3d:'the graph shifts right by h',
+    r4n:'Horizontal shift left', r4d:'the graph shifts left by h',
+    r5n:'Reflection over the x-axis', r5d:'the graph is flipped upside down',
+    r6n:'Reflection over the y-axis', r6d:'the graph is mirrored left to right',
+    r7n:'Vertical stretch', r7d:'the graph is stretched vertically by a factor of a',
+    r8n:'Vertical compression', r8d:'the graph is compressed vertically by a factor of a',
+    r9n:'Horizontal compression', r9d:'the graph is compressed horizontally by a factor of b',
+    r10n:'Horizontal stretch', r10d:'the graph is stretched horizontally by a factor of b',
+    r11n:'Absolute value of y', r11d:'the part of the graph below the x-axis is flipped up',
+    r12n:'Absolute value of x', r12d:'the right half of the graph (x ≥ 0) is mirrored onto the left; the original left half is discarded'
+  }
+};
+
+let currentLang = 'ru';
+
+function applyLang(lang){
+  currentLang = lang;
+  const dict = translations[lang];
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if(dict[key] !== undefined) el.textContent = dict[key];
+  });
+  const svgEl = document.querySelector('[data-i18n-aria]');
+  if(svgEl) svgEl.setAttribute('aria-label', dict.plotAria);
+  document.documentElement.lang = lang;
+  document.getElementById('langBtn').textContent = lang === 'ru' ? 'EN' : 'RU';
+}
+
+// ---------- base functions ----------
+function fn(type){
+  if(type==='lin')  return x => x;
+  if(type==='abs')  return x => Math.abs(x);
+  if(type==='x2')   return x => x*x;
+  if(type==='cube') return x => x*x*x;
+  if(type==='sqrt') return x => x>=0 ? Math.sqrt(x) : NaN;
+  if(type==='inv')  return x => x!==0 ? 1/x : NaN;
+  if(type==='exp')  return x => Math.exp(x);
+  if(type==='ln')   return x => x>0 ? Math.log(x) : NaN;
+  if(type==='sin')  return x => Math.sin(x);
+  if(type==='cos')  return x => Math.cos(x);
+  if(type==='tan')  return x => Math.tan(x);
+  return x => x;
+}
+function fnLabel(type){
+  return {lin:'x', abs:'|x|', x2:'x²', cube:'x³', sqrt:'√x', inv:'1/x',
+          exp:'e^x', ln:'ln(x)', sin:'sin(x)', cos:'cos(x)', tan:'tan(x)'}[type];
+}
+// argument values where the base function has a vertical asymptote
+function baseAsymptotes(type){
+  if(type==='inv') return [0];
+  if(type==='tan'){ let r=[]; for(let n=-6;n<=6;n++) r.push(Math.PI/2 + n*Math.PI); return r; }
+  return [];
+}
+
+// ---------- parenthesis colouring ----------
+const MODES = [
+  { id:'phone', nameRu:'Телефон', nameEn:'Phone', shortRu:'Тел', shortEn:'Phone',
+    ui:1, plot:1, scheme:'light dark', strokeMain:2, strokeBase:1.5, tickFont:9, axisFont:10,
+    vars:null,                                   // follow the system light/dark theme
+    accent:'#378ADD', base:'#898781',
+    func:{ f:'#e63946', t:'#457b9d', s:'#2a9d8f', m:'#e9a13b', n:'#9b5de5', p:'#06aed5', q:'#ef476f' } },
+
+  { id:'board', nameRu:'Доска / проектор', nameEn:'Whiteboard / projector', shortRu:'Доска', shortEn:'Board',
+    ui:1.25, plot:1.3, scheme:'light', strokeMain:5, strokeBase:3, tickFont:14, axisFont:15,
+    vars:{ '--bg':'#ffffff', '--surface':'#f2f2ef', '--border':'#c9c9c2', '--border-strong':'#6b6b64',
+           '--text-primary':'#000000', '--text-secondary':'#333330' },
+    accent:'#0033CC', base:'#5a5a55',
+    func:{ f:'#CC0000', t:'#0033CC', s:'#00701F', m:'#B35C00', n:'#6A00A8', p:'#006E7A', q:'#A3006E' } },
+
+  { id:'hall', nameRu:'Тёмный зал', nameEn:'Dark room', shortRu:'Зал', shortEn:'Dark',
+    ui:1.2, plot:1.25, scheme:'dark', strokeMain:4, strokeBase:2.5, tickFont:13, axisFont:14,
+    vars:{ '--bg':'#000000', '--surface':'#141414', '--border':'#333333', '--border-strong':'#777777',
+           '--text-primary':'#ffffff', '--text-secondary':'#c8c8c8' },
+    accent:'#4DA3FF', base:'#9a9a9a',
+    func:{ f:'#FF5A4D', t:'#4DA3FF', s:'#2FD68A', m:'#FFB13D', n:'#C98BFF', p:'#3FD8E8', q:'#FF6FB5' } },
+
+  { id:'print', nameRu:'Печать', nameEn:'Print', shortRu:'Печать', shortEn:'Print',
+    ui:1, plot:1.05, scheme:'light', strokeMain:2.5, strokeBase:1.5, tickFont:10, axisFont:11,
+    vars:{ '--bg':'#ffffff', '--surface':'#ffffff', '--border':'#d8d8d4', '--border-strong':'#555550',
+           '--text-primary':'#111111', '--text-secondary':'#444440' },
+    accent:'#1A1A1A', base:'#9a9a94',
+    func:{ f:'#000000', t:'#2E4A7D', s:'#1F5F49', m:'#7A4A10', n:'#4A2A6B', p:'#14606B', q:'#6B2050' } },
+
+  { id:'okabe', nameRu:'Дальтоник-безопасная', nameEn:'Colour-blind safe', shortRu:'ЦД', shortEn:'CVD',
+    ui:1.1, plot:1.15, scheme:'light', strokeMain:3.5, strokeBase:2, tickFont:12, axisFont:13,
+    vars:{ '--bg':'#ffffff', '--surface':'#f4f4f1', '--border':'#cdcdc7', '--border-strong':'#6f6f69',
+           '--text-primary':'#111111', '--text-secondary':'#3a3a36' },
+    accent:'#0072B2', base:'#999999',
+    func:{ f:'#D55E00', t:'#0072B2', s:'#009E73', m:'#E69F00', n:'#CC79A7', p:'#56B4E9', q:'#8B6F00' } }
+];
+let modeIndex = 0;
+let MODE = MODES[0];
+let FUNC_COLORS = MODES[0].func;
+
+const THEME_VARS = ['--bg','--surface','--border','--border-strong','--text-primary','--text-secondary'];
+
+function applyMode(i){
+  modeIndex = ((i % MODES.length) + MODES.length) % MODES.length;
+  MODE = MODES[modeIndex];
+  FUNC_COLORS = MODE.func;
+  const root = document.documentElement;
+  root.style.setProperty('--ui', MODE.ui);
+  root.style.setProperty('--plot', MODE.plot);
+  root.style.setProperty('--accent', MODE.accent);
+  root.style.setProperty('--base-line', MODE.base);
+  THEME_VARS.forEach(v => {
+    if(MODE.vars) root.style.setProperty(v, MODE.vars[v]);
+    else root.style.removeProperty(v);         // follow the system theme
+  });
+  // native controls (select, range, checkbox) obey color-scheme, not our variables
+  root.style.colorScheme = MODE.scheme;
+  root.style.background = MODE.vars ? MODE.vars['--bg'] : '';
+  const btn = document.getElementById('modeBtn');
+  const dict = translations[currentLang];
+  btn.textContent = dict.paletteBtn;
+  btn.title = dict.paletteBtn + ': ' + (currentLang === 'ru' ? MODE.nameRu : MODE.nameEn);
+}
+
+const DEFAULT_PAREN_COLOR = '#888888';
+
+function colorParens(str){
+  let stack = [], out = '';
+  for(let i=0;i<str.length;i++){
+    const ch = str[i];
+    if(ch === '('){
+      const prev = i>0 ? str[i-1] : '';
+      const prevPrevIsLetter = i>1 && /[a-zA-Z]/.test(str[i-2]);
+      const color = (FUNC_COLORS[prev] && !prevPrevIsLetter) ? FUNC_COLORS[prev] : DEFAULT_PAREN_COLOR;
+      stack.push(color);
+      out += '<span style="color:'+color+'">(</span>';
+    } else if(ch === ')'){
+      const color = stack.pop() || DEFAULT_PAREN_COLOR;
+      out += '<span style="color:'+color+'">)</span>';
+    } else out += ch;
+  }
+  return out;
+}
+
+// ---------- expression helpers ----------
+function needsWrap(v){
+  if(v === 'x') return false;
+  if(v[0] === '-') return true;
+  let depth = 0;
+  for(let i=0;i<v.length;i++){
+    const c = v[i];
+    if(c==='(') depth++;
+    else if(c===')') depth--;
+    else if(depth===0 && (c==='+'||c==='-'||c==='·'||c==='/')) return true;
+  }
+  return false;
+}
+function wrap(v){ return needsWrap(v) ? '('+v+')' : v; }
+function num(v){ return Number.isInteger(v) ? String(v) : v.toFixed(1); }
+
+// build the ordered layer list for a given state
+function buildLayers(st, rawLabel, dict){
+  const fmt = (t,n) => t.replace('{n}', n);
+  const L = {
+    p: { letter:'p', active: st.absX, def:'p(x) = |x|',
+         apply: v => '|'+v+'|', effect: dict.absXComment },
+    t: { letter:'t', active: st.h !== 0, def:'t(x) = x'+(st.h>0?'-':'+')+Math.abs(st.h),
+         apply: v => v+(st.h>0?'-':'+')+Math.abs(st.h),
+         effect: (st.h>0 ? fmt(dict.shiftRight, Math.abs(st.h)) : fmt(dict.shiftLeft, Math.abs(st.h)))
+                 + ' (h = ' + st.h + ')' },
+    s: { letter:'s', active: st.b !== 1, def:'s(x) = '+num(st.b)+'·x',
+         apply: v => st.b===-1 ? '-'+wrap(v) : num(st.b)+'·'+wrap(v),
+         effect: (function(){
+           if(st.b === 0) return dict.degenHoriz;
+           let parts = [];
+           if(st.b < 0) parts.push(dict.reflectYAxis);
+           const mag = Math.abs(st.b);
+           let note = 'b = ' + num(st.b);
+           if(mag > 1){ parts.push(fmt(dict.compressHoriz, num(mag))); note += ', |b| = ' + num(mag); }
+           else if(mag < 1){ parts.push(fmt(dict.stretchHoriz, (1/mag).toFixed(1)));
+                             note += ', 1/|b| = 1/' + num(mag) + ' = ' + (1/mag).toFixed(1); }
+           return parts.join(' '+dict.andWord+' ') + ' (' + note + ')';
+         })() },
+    f: { letter:'f', active: true, isBase: true, def: null,
+         apply: v => rawLabel.replace('x', wrap(v)), effect: null },
+    m: { letter:'m', active: st.a !== 1, def:'m(x) = '+num(st.a)+'·x',
+         apply: v => st.a===-1 ? '-'+wrap(v) : num(st.a)+'·'+wrap(v),
+         effect: (function(){
+           if(st.a === 0) return dict.degenVert;
+           let parts = [];
+           if(st.a < 0) parts.push(dict.reflectXAxis);
+           const mag = Math.abs(st.a);
+           let note = 'a = ' + num(st.a);
+           if(mag > 1){ parts.push(fmt(dict.stretchVert, num(mag))); note += ', |a| = ' + num(mag); }
+           else if(mag < 1){ parts.push(fmt(dict.compressVert, (1/mag).toFixed(1)));
+                             note += ', 1/|a| = 1/' + num(mag) + ' = ' + (1/mag).toFixed(1); }
+           return parts.join(' '+dict.andWord+' ') + ' (' + note + ')';
+         })() },
+    n: { letter:'n', active: st.k !== 0, def:'n(x) = x'+(st.k>0?'+':'-')+Math.abs(st.k),
+         apply: v => v+(st.k>0?'+':'-')+Math.abs(st.k),
+         effect: (st.k>0 ? fmt(dict.shiftUp, Math.abs(st.k)) : fmt(dict.shiftDown, Math.abs(st.k)))
+                 + ' (k = ' + st.k + ')' },
+    q: { letter:'q', active: st.absY, def:'q(x) = |x|',
+         apply: v => '|'+v+'|', effect: dict.absYComment }
+  };
+  return [L.p, L.t, L.s, L.f, L.m, L.n, L.q];
+}
+
+// evaluate the composed value expression for a state
+function composedExpr(st, rawLabel, dict){
+  const active = buildLayers(st, rawLabel, dict).filter(l => l.active);
+  let v = 'x', sym = 'x';
+  active.forEach(l => { v = l.apply(v); sym = l.letter+'('+sym+')'; });
+  return { value: v, symbolic: sym };
+}
+
+// ---------- numeric transform ----------
+function makeTransform(type, st){
+  const f = fn(type);
+  return function(x){
+    const u = st.absX ? Math.abs(x) : x;
+    let y = st.a * f(st.b * (u - st.h)) + st.k;
+    if(st.absY) y = Math.abs(y);
+    return y;
+  };
+}
+// inverse: which x maps to a given base-function argument u0
+function preimages(st, u0){
+  let xs = [];
+  if(st.b === 0) return xs;
+  const core = st.h + u0/st.b;
+  if(st.absX){ if(core >= 0){ xs.push(core); xs.push(-core); } }
+  else xs.push(core);
+  return xs;
+}
+
+// ---------- geometry ----------
+function toPx(x,y){ return [ox + x*scale, oy - y*scale]; }
+function xMin(){ return -ox/scale; }
+function xMax(){ return  ox/scale; }
+function yLim(){ return oy/scale; }
+
+function buildPath(fun){
+  let d = '', started = false, prevY = null;
+  const lim = yLim() * 1.5;
+  for(let px=0; px<=W; px++){
+    const xw = (px-ox)/scale;
+    const yw = fun(xw);
+    if(!isFinite(yw) || isNaN(yw) || Math.abs(yw) > lim){ started = false; prevY = null; continue; }
+    // break the line across a vertical asymptote (sign flip with a huge jump)
+    if(prevY !== null && Math.abs(yw - prevY) > lim) started = false;
+    const [X,Y] = toPx(xw,yw);
+    d += (started ? 'L' : 'M') + X.toFixed(1) + ' ' + Y.toFixed(1) + ' ';
+    started = true; prevY = yw;
+  }
+  return d;
+}
+
+const GRID_STEP = 1;                 // one cell = one unit
+function labelStep(){                // thin out labels only if they would collide
+  const needed = MODE.tickFont * 2.2;
+  for(const s of [1,2,5,10]){ if(s*scale >= needed) return s; }
+  return 20;
+}
+
+function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+function drawGrid(){
+  const border = css('--border'), strong = css('--border-strong'), label = css('--text-secondary');
+  const step = labelStep();
+  const g = GRID_STEP;
+  const xl = xMax(), yl = yLim();
+  let s = '';
+  for(let x = Math.ceil(-xl/g)*g; x <= xl; x += g){
+    const [X] = toPx(x,0);
+    s += '<line x1="'+X.toFixed(1)+'" y1="0" x2="'+X.toFixed(1)+'" y2="'+H+'" stroke="'+border+'" stroke-width="0.5"/>';
+  }
+  for(let y = Math.ceil(-yl/g)*g; y <= yl; y += g){
+    const [,Y] = toPx(0,y);
+    s += '<line x1="0" y1="'+Y.toFixed(1)+'" x2="'+W+'" y2="'+Y.toFixed(1)+'" stroke="'+border+'" stroke-width="0.5"/>';
+  }
+  s += '<line x1="0" y1="'+oy+'" x2="'+W+'" y2="'+oy+'" stroke="'+strong+'" stroke-width="'+(MODE.strokeBase*0.9).toFixed(1)+'"/>';
+  s += '<line x1="'+ox+'" y1="0" x2="'+ox+'" y2="'+H+'" stroke="'+strong+'" stroke-width="'+(MODE.strokeBase*0.9).toFixed(1)+'"/>';
+
+  // numeric labels
+  const fmtTick = v => (Math.abs(v - Math.round(v)) < 1e-9) ? String(Math.round(v)) : v.toFixed(1);
+  for(let x = Math.ceil(-xl/step)*step; x <= xl; x += step){
+    if(Math.abs(x) < 1e-9) continue;
+    const [X] = toPx(x,0);
+    if(X < 6+MODE.tickFont || X > W-6-MODE.tickFont) continue;
+    s += '<line x1="'+X.toFixed(1)+'" y1="'+(oy-3)+'" x2="'+X.toFixed(1)+'" y2="'+(oy+3)+'" stroke="'+strong+'" stroke-width="1"/>';
+    s += '<text x="'+X.toFixed(1)+'" y="'+(oy+14)+'" fill="'+label+'" font-size="'+MODE.tickFont+'" text-anchor="middle">'+fmtTick(x)+'</text>';
+  }
+  for(let y = Math.ceil(-yl/step)*step; y <= yl; y += step){
+    if(Math.abs(y) < 1e-9) continue;
+    const [,Y] = toPx(0,y);
+    if(Y < 10 || Y > H-6) continue;
+    s += '<line x1="'+(ox-3)+'" y1="'+Y.toFixed(1)+'" x2="'+(ox+3)+'" y2="'+Y.toFixed(1)+'" stroke="'+strong+'" stroke-width="1"/>';
+    s += '<text x="'+(ox-6)+'" y="'+(Y+3).toFixed(1)+'" fill="'+label+'" font-size="'+MODE.tickFont+'" text-anchor="end">'+fmtTick(y)+'</text>';
+  }
+  s += '<text x="'+(W-6)+'" y="'+(oy-6)+'" fill="'+label+'" font-size="'+MODE.axisFont+'" text-anchor="end">x</text>';
+  s += '<text x="'+(ox+6)+'" y="12" fill="'+label+'" font-size="'+MODE.axisFont+'">y</text>';
+  return s;
+}
+
+function drawAsymptotes(type, st){
+  const us = baseAsymptotes(type);
+  if(us.length === 0) return '';
+  const color = css('--text-secondary');
+  let s = '', drawn = [];
+  us.forEach(u0 => {
+    preimages(st, u0).forEach(xv => {
+      if(xv < xMin() || xv > xMax()) return;
+      if(drawn.some(d => Math.abs(d - xv) < 1e-6)) return;
+      drawn.push(xv);
+      const [X] = toPx(xv, 0);
+      s += '<line x1="'+X.toFixed(1)+'" y1="0" x2="'+X.toFixed(1)+'" y2="'+H+'" stroke="'+color+'" stroke-width="0.75" stroke-dasharray="2 4" opacity="0.55"/>';
+    });
+  });
+  return s;
+}
+
+function drawGraph(type, st){
+  const f = fn(type);
+  const tr = makeTransform(type, st);
+  svg.innerHTML = drawGrid()
+    + drawAsymptotes(type, st)
+    + '<path d="'+buildPath(f)+'" fill="none" stroke="'+css('--base-line')+'" stroke-width="'+MODE.strokeBase+'" stroke-dasharray="'+(MODE.strokeBase*2.5).toFixed(1)+' '+(MODE.strokeBase*2).toFixed(1)+'"/>'
+    + '<path d="'+buildPath(tr)+'" fill="none" stroke="'+css('--accent')+'" stroke-width="'+MODE.strokeMain+'"/>';
+}
+
+// ---------- state ----------
+function readDom(){
+  return {
+    k: parseFloat(document.getElementById('k').value),
+    h: parseFloat(document.getElementById('h').value),
+    a: parseFloat(document.getElementById('a').value),
+    b: parseFloat(document.getElementById('b').value),
+    absX: document.getElementById('absX').checked,
+    absY: document.getElementById('absY').checked
+  };
+}
+function writeDom(st){
+  document.getElementById('k').value = st.k;
+  document.getElementById('h').value = st.h;
+  document.getElementById('a').value = st.a;
+  document.getElementById('b').value = st.b;
+  document.getElementById('absX').checked = st.absX;
+  document.getElementById('absY').checked = st.absY;
+}
+const NEUTRAL = { k:0, h:0, a:1, b:1, absX:false, absY:false };
+
+let targetState = Object.assign({}, NEUTRAL);
+let stepIndex = 0;
+let animId = null;
+
+// keys in the same order the layers are applied
+// the order layers are applied in, and what makes each one active
+const LAYER_ORDER = [
+  ['absX', st => st.absX],
+  ['h',    st => st.h !== 0],
+  ['b',    st => st.b !== 1],
+  ['a',    st => st.a !== 1],
+  ['k',    st => st.k !== 0],
+  ['absY', st => st.absY]
+];
+function activeKeys(st){
+  return LAYER_ORDER.filter(([, on]) => on(st)).map(([key]) => key);
+}
+function stateAtStep(i){
+  const keys = activeKeys(targetState);
+  let st = Object.assign({}, NEUTRAL);
+  keys.slice(0, i).forEach(key => { st[key] = targetState[key]; });
+  return st;
+}
+
+// ---------- rendering ----------
+function renderSteps(){
+  const dict = translations[currentLang];
+  const type = document.getElementById('fnSel').value;
+  const rawLabel = fnLabel(type);
+  const active = buildLayers(targetState, rawLabel, dict).filter(l => l.active);
+  const coeffLayers = active.filter(l => !l.isBase);
+
+  let items = [{ html: colorParens(dict.baseLine), idx: 0 }];
+  if(coeffLayers.length > 0){
+    let effects = [], counter = 0;
+    active.forEach((layer, idx) => {
+      if(layer.isBase) return;
+      counter++;
+      let chain = active.slice(0, idx+1);
+      if(!chain.some(l => l.isBase)) chain = chain.concat(active.filter(l => l.isBase));
+      const m = chain.length;
+      let vals = ['x'];
+      for(let i=0;i<m;i++) vals.push(chain[i].apply(vals[i]));
+      let parts = [];
+      for(let j=0;j<=m;j++){
+        let e = vals[j];
+        for(let o=j;o<m;o++) e = chain[o].letter+'('+e+')';
+        parts.push(e);
+      }
+      const chainText = parts.filter((p,i2) => i2===0 || p !== parts[i2-1]).join(' = ');
+      effects.push(layer.effect);
+      const comment = dict.baseGraphPrefix + ' ' + effects.join(', ' + dict.thenWord + ' ') + '.';
+      let html = colorParens(dict.stepLet + ': ' + layer.def + '. ' + dict.stepThen + ': ' + chainText + '; ' + comment);
+      if(counter === coeffLayers.length){
+        const full = composedExpr(targetState, rawLabel, dict);
+        html += '<br>' + colorParens(dict.stepFull + ': g(x) = ' + full.symbolic + ' = ' + full.value + '.');
+      }
+      items.push({ html, idx: counter });
+    });
+  }
+
+  document.getElementById('stepsList').innerHTML = items.map(it => {
+    let cls = '';
+    if(it.idx === stepIndex) cls = ' class="current"';
+    else if(it.idx > stepIndex) cls = ' class="pending"';
+    return '<li'+cls+'>' + it.html + '</li>';
+  }).join('');
+}
+
+function renderFormulas(st){
+  const dict = translations[currentLang];
+  const type = document.getElementById('fnSel').value;
+  const rawLabel = fnLabel(type);
+
+  // one pass builds both forms: with f(...) kept, and with f expanded
+  let withF = 'x', expanded = 'x';
+  buildLayers(st, rawLabel, dict).filter(l => l.active).forEach(l => {
+    withF    = l.isBase ? 'f(' + withF + ')' : l.apply(withF);
+    expanded = l.apply(expanded);
+  });
+
+  document.getElementById('formulaSub').innerHTML = 'g(x) = ' + colorParens(withF);
+  document.getElementById('formula').innerHTML   = 'g(x) = ' + colorParens(expanded);
+}
+
+function updateStepNav(){
+  const total = activeKeys(targetState).length;
+  document.getElementById('prevStep').disabled = (stepIndex <= 0);
+  document.getElementById('nextStep').disabled = (stepIndex >= total);
+  document.getElementById('stepIndicator').textContent = total === 0 ? '—' : (stepIndex + ' / ' + total);
+}
+
+function render(){
+  const type = document.getElementById('fnSel').value;
+  const st = readDom();
+  document.getElementById('kOut').textContent = st.k;
+  document.getElementById('hOut').textContent = st.h;
+  document.getElementById('aOut').textContent = num(st.a);
+  document.getElementById('bOut').textContent = num(st.b);
+  drawGraph(type, st);
+  renderFormulas(st);
+  renderSteps();
+  updateStepNav();
+}
+
+// ---------- animated stepping ----------
+function applyStep(i){
+  const total = activeKeys(targetState).length;
+  const from = readDom();
+  stepIndex = Math.max(0, Math.min(i, total));
+  const to = stateAtStep(stepIndex);
+  if(animId) cancelAnimationFrame(animId);
+
+  const type = document.getElementById('fnSel').value;
+  const duration = 420, start = performance.now();
+  const ease = p => p < 0.5 ? 4*p*p*p : 1 - Math.pow(-2*p+2,3)/2;
+
+  function frame(now){
+    const p = Math.min(1, (now - start)/duration), e = ease(p);
+    const cur = {
+      k: from.k + (to.k - from.k)*e,
+      h: from.h + (to.h - from.h)*e,
+      a: from.a + (to.a - from.a)*e,
+      b: from.b + (to.b - from.b)*e,
+      absX: (e < 1 ? from.absX : to.absX),
+      absY: (e < 1 ? from.absY : to.absY)
+    };
+    drawGraph(type, cur);
+    document.getElementById('kOut').textContent = cur.k.toFixed(1);
+    document.getElementById('hOut').textContent = cur.h.toFixed(1);
+    document.getElementById('aOut').textContent = cur.a.toFixed(1);
+    document.getElementById('bOut').textContent = cur.b.toFixed(1);
+    document.getElementById('k').value = cur.k;
+    document.getElementById('h').value = cur.h;
+    document.getElementById('a').value = cur.a;
+    document.getElementById('b').value = cur.b;
+    if(p < 1) animId = requestAnimationFrame(frame);
+    else { animId = null; writeDom(to); render(); }
+  }
+  animId = requestAnimationFrame(frame);
+}
+
+// ---------- events ----------
+function stopAnim(){ if(animId){ cancelAnimationFrame(animId); animId = null; } }
+
+const ZOOM_LEVELS = [0.25, 0.4, 0.6, 1, 1.5, 2.5, 4];
+function setZoom(z){
+  zoom = Math.min(ZOOM_LEVELS[ZOOM_LEVELS.length-1], Math.max(ZOOM_LEVELS[0], z));
+  scale = BASE_SCALE * zoom;
+  document.getElementById('zoomIn').disabled  = zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length-1];
+  document.getElementById('zoomOut').disabled = zoom <= ZOOM_LEVELS[0];
+  render();
+}
+function stepZoom(dir){
+  const i = ZOOM_LEVELS.findIndex(v => Math.abs(v - zoom) < 1e-9);
+  const j = i === -1
+    ? (dir > 0 ? ZOOM_LEVELS.findIndex(v => v > zoom) : ZOOM_LEVELS.length-1)
+    : i + dir;
+  setZoom(ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length-1, Math.max(0, j))]);
+}
+document.getElementById('zoomIn').addEventListener('click', () => stepZoom(1));
+document.getElementById('zoomOut').addEventListener('click', () => stepZoom(-1));
+
+// wheel on the plot
+document.querySelector('.plot-wrap').addEventListener('wheel', e => {
+  e.preventDefault();
+  stepZoom(e.deltaY < 0 ? 1 : -1);
+}, {passive:false});
+
+// pinch on the plot
+(function(){
+  const el = document.querySelector('.plot-wrap');
+  let d0 = null, z0 = 1;
+  const dist = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
+  el.addEventListener('touchstart', e => {
+    if(e.touches.length === 2){ d0 = dist(e.touches); z0 = zoom; }
+  }, {passive:true});
+  el.addEventListener('touchmove', e => {
+    if(e.touches.length === 2 && d0){
+      e.preventDefault();
+      setZoom(z0 * dist(e.touches)/d0);
+    }
+  }, {passive:false});
+  el.addEventListener('touchend', () => { d0 = null; }, {passive:true});
+})();
+
+document.getElementById('prevStep').addEventListener('click', () => applyStep(stepIndex - 1));
+document.getElementById('nextStep').addEventListener('click', () => applyStep(stepIndex + 1));
+
+document.addEventListener('keydown', e => {
+  // let a focused slider / select / checkbox keep its own arrow behaviour
+  const t = e.target;
+  if(t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  if(e.key === 'ArrowLeft'){ e.preventDefault(); applyStep(stepIndex - 1); }
+  else if(e.key === 'ArrowRight'){ e.preventDefault(); applyStep(stepIndex + 1); }
+});
+
+// swipe on the plot
+(function(){
+  const el = document.querySelector('.plot-wrap');
+  let x0 = null, y0 = null;
+  el.addEventListener('touchstart', e => {
+    if(e.touches.length !== 1){ x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+  }, {passive:true});
+  el.addEventListener('touchend', e => {
+    if(x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    const dy = e.changedTouches[0].clientY - y0;
+    if(Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)*1.5){
+      applyStep(dx < 0 ? stepIndex + 1 : stepIndex - 1);
+    }
+    x0 = null; y0 = null;
+  }, {passive:true});
+})();
+
+function onManualEdit(){
+  stopAnim();
+  targetState = readDom();
+  stepIndex = activeKeys(targetState).length;
+  render();
+}
+['k','h','a','b','absY','absX'].forEach(id =>
+  document.getElementById(id).addEventListener('input', onManualEdit));
+
+document.getElementById('fnSel').addEventListener('input', () => {
+  stopAnim();
+  writeDom(targetState);                        // undo any partial step state
+  stepIndex = activeKeys(targetState).length;   // the breakdown restarts fully applied
+  render();
+});
+
+document.getElementById('resetBtn').addEventListener('click', function(){
+  stopAnim();
+  writeDom(NEUTRAL);
+  targetState = Object.assign({}, NEUTRAL);
+  stepIndex = 0;
+  render();
+});
+
+document.getElementById('langBtn').addEventListener('click', function(){
+  applyLang(currentLang === 'ru' ? 'en' : 'ru');
+  applyMode(modeIndex);
+  render();
+});
+
+// ---------- init ----------
+applyLang('ru');
+applyMode(0);
+setZoom(1);
+document.getElementById('modeBtn').addEventListener('click', () => { applyMode(modeIndex + 1); render(); });
+targetState = readDom();
+stepIndex = activeKeys(targetState).length;
+render();
+})();
+</script>
+</body>
+</html>
